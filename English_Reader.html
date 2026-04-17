@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>English Speaker Mobile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        input[type="range"] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type="range"]::-webkit-slider-runnable-track { width: 100%; height: 8px; cursor: pointer; background: #e2e8f0; border-radius: 4px; }
+        input[type="range"]::-webkit-slider-thumb { height: 20px; width: 20px; border-radius: 50%; background: #4f46e5; cursor: pointer; -webkit-appearance: none; margin-top: -6px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="max-w-md w-full glass p-6 rounded-[2.5rem] shadow-xl border border-white">
+        <div class="text-center mb-6">
+            <h1 class="text-xl font-bold text-slate-800 flex items-center justify-center gap-2">
+                English Speaker 🎙️
+            </h1>
+            <p class="text-[10px] text-slate-500 font-medium tracking-widest uppercase mt-1">Mobile Optimized</p>
+        </div>
+
+        <div class="space-y-5">
+            <div>
+                <textarea id="textInput" rows="3" 
+                    class="w-full p-4 rounded-2xl border-none ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-500 bg-white text-slate-700 text-sm transition-all resize-none shadow-inner"
+                    placeholder="ここに英語を入力してください..."></textarea>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Speaker</label>
+                    <select id="voiceSelect" class="w-full bg-transparent text-sm font-semibold text-slate-700 focus:outline-none cursor-pointer">
+                        <optgroup label="Deep Male">
+                            <option value="Enceladus">Enceladus</option>
+                            <option value="Iapetus">Iapetus</option>
+                        </optgroup>
+                        <optgroup label="Standard">
+                            <option value="Kore" selected>Kore</option>
+                            <option value="Zephyr">Zephyr</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1">Speed</label>
+                    <select id="rateSelect" class="w-full bg-transparent text-sm font-semibold text-slate-700 focus:outline-none cursor-pointer">
+                        <option value="normal">Normal</option>
+                        <option value="slow">Slow</option>
+                        <option value="fast">Fast</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="playerControls" class="bg-slate-50 p-4 rounded-2xl border border-slate-100 opacity-40 pointer-events-none transition-all">
+                <div class="flex justify-between text-[10px] font-bold text-slate-400 mb-2 px-1">
+                    <span id="currentTime">0:00</span>
+                    <span id="durationTime">0:00</span>
+                </div>
+                <input type="range" id="seekBar" value="0" step="0.1" class="mb-1">
+            </div>
+
+            <div class="flex gap-3">
+                <button id="speakBtn" 
+                    class="flex-[4] py-4 bg-indigo-600 active:bg-indigo-800 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2">
+                    <span id="btnIcon">▶️</span>
+                    <span id="btnText">読み上げる</span>
+                </button>
+                <button id="downloadBtn" disabled
+                    class="flex-1 py-4 bg-white active:bg-slate-50 border-2 border-slate-100 text-slate-400 font-bold rounded-2xl transition-all flex items-center justify-center disabled:opacity-20 shadow-sm">
+                    💾
+                </button>
+            </div>
+        </div>
+        
+        <p id="errorMsg" class="mt-4 text-[10px] text-red-400 text-center hidden font-medium"></p>
+    </div>
+
+    <script>
+        const apiKey = ""; 
+        const textInput = document.getElementById('textInput');
+        const speakBtn = document.getElementById('speakBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const btnText = document.getElementById('btnText');
+        const voiceSelect = document.getElementById('voiceSelect');
+        const rateSelect = document.getElementById('rateSelect');
+        const errorMsg = document.getElementById('errorMsg');
+        const playerControls = document.getElementById('playerControls');
+        const seekBar = document.getElementById('seekBar');
+        const currentTimeEl = document.getElementById('currentTime');
+        const durationTimeEl = document.getElementById('durationTime');
+
+        const audioCache = new Map();
+        let currentAudio = null;
+        let lastBlob = null;
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return "0:00";
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60);
+            return `${min}:${sec.toString().padStart(2, '0')}`;
+        }
+
+        function pcmToWav(pcmData, sampleRate) {
+            const buffer = new ArrayBuffer(44 + pcmData.length);
+            const view = new DataView(buffer);
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 32 + pcmData.length, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, pcmData.length, true);
+            new Uint8Array(buffer, 44).set(new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength));
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        async function speakText() {
+            const text = textInput.value.trim();
+            if (!text) return;
+
+            errorMsg.classList.add('hidden');
+            if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+            const voice = voiceSelect.value;
+            const rate = rateSelect.value;
+            const cacheKey = `${voice}_${rate}_${text}`;
+
+            if (audioCache.has(cacheKey)) {
+                lastBlob = audioCache.get(cacheKey);
+                playAudio(lastBlob);
+                return;
+            }
+
+            speakBtn.disabled = true;
+            btnText.textContent = "考え中...";
+            
+            let promptModifier = rate === "slow" ? "Say slowly: " : rate === "fast" ? "Say quickly: " : "";
+
+            const payload = {
+                contents: [{ parts: [{ text: `${promptModifier}${text}` }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+            let retries = 0;
+            const maxRetries = 5;
+
+            while (retries <= maxRetries) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({ error: { message: "Unknown error" } }));
+                        throw new Error(err.error?.message || `HTTP ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const audioData = result.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+
+                    if (audioData) {
+                        const binaryData = atob(audioData.data);
+                        const bytes = new Uint8Array(binaryData.length);
+                        for (let i = 0; i < binaryData.length; i++) bytes[i] = binaryData.charCodeAt(i);
+
+                        const sampleRate = parseInt(audioData.mimeType.split('rate=')[1]) || 24000;
+                        lastBlob = pcmToWav(bytes, sampleRate);
+                        audioCache.set(cacheKey, lastBlob);
+                        playAudio(lastBlob);
+                        break;
+                    }
+                } catch (error) {
+                    if (retries === maxRetries) {
+                        errorMsg.textContent = "エラー: " + error.message;
+                        errorMsg.classList.remove('hidden');
+                        resetButton();
+                    }
+                    await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+                    retries++;
+                }
+            }
+        }
+
+        function playAudio(blob) {
+            const url = URL.createObjectURL(blob);
+            currentAudio = new Audio(url);
+            
+            playerControls.classList.remove('opacity-40', 'pointer-events-none');
+            speakBtn.disabled = true;
+            downloadBtn.disabled = false;
+            btnText.textContent = "再生中...";
+
+            currentAudio.addEventListener('loadedmetadata', () => {
+                seekBar.max = currentAudio.duration;
+                durationTimeEl.textContent = formatTime(currentAudio.duration);
+            });
+
+            currentAudio.addEventListener('timeupdate', () => {
+                seekBar.value = currentAudio.currentTime;
+                currentTimeEl.textContent = formatTime(currentAudio.currentTime);
+            });
+
+            currentAudio.onended = resetButton;
+            currentAudio.play().catch(e => {
+                errorMsg.textContent = "再生エラー: 画面を一度タップしてからお試しください";
+                errorMsg.classList.remove('hidden');
+                resetButton();
+            });
+        }
+
+        function resetButton() {
+            speakBtn.disabled = false;
+            btnText.textContent = "読み上げる";
+            seekBar.value = 0;
+            currentTimeEl.textContent = "0:00";
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            if (!lastBlob) return;
+            const url = URL.createObjectURL(lastBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `english_${Date.now()}.wav`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { document.body.removeChild(a); window.URL.revokeObjectURL(url); }, 100);
+        });
+
+        seekBar.addEventListener('input', () => { if (currentAudio) currentAudio.currentTime = seekBar.value; });
+        speakBtn.addEventListener('click', speakText);
+    </script>
+</body>
+</html>
